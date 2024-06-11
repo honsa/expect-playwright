@@ -1,65 +1,70 @@
-import { testWrapper } from "../tests/utils"
-
-import toHaveText from '.'
+import { assertSnapshot } from "../tests/utils"
 
 describe("toHaveText", () => {
-  afterEach(async () => {
-    await page.evaluate(() => document.body.innerHTML = "")
+  beforeEach(async () => {
+    await jestPlaywright.resetContext()
   })
   describe("selector", () => {
-    it("positive", async () => {
-      await page.evaluate(() => {
-        document.write(`<div id="foobar">zzzBarzzz</div>`)
+    it("positive frame", async () => {
+      await page.setContent(`<iframe src="http://localhost:8080"></iframe>`)
+      const handle = await page.$("iframe")
+      const iframe = await handle?.contentFrame()
+      await expect(handle).toHaveText("expect-playwright")
+      await expect(iframe).toHaveText("expect-playwright")
+    })
+    it("empty positive with page element", async () => {
+      await page.setContent(`<div id="foobar"></div>`)
+      await expect(page).toHaveText("#foobar", "", {
+        state: "attached",
       })
-      const result = await toHaveText(page, "#foobar", "Bar")
-      expect(result.pass).toBe(true)
-      expect(result.message()).toMatchSnapshot()
+    })
+    it("empty positive with custom element", async () => {
+      await page.setContent(`<div id="foobar"></div>`)
+      const element = await page.$("#foobar")
+      expect(element).not.toBe(null)
+      await expect(element).toHaveText("")
+    })
+    it("positive", async () => {
+      await page.setContent(`<div id="foobar">zzzBarzzz</div>`)
+      await expect(page).toHaveText("#foobar", "Bar")
     })
     it("negative", async () => {
-      await page.evaluate(() => {
-        document.write(`<div id="foobar">zzzBarzzz</div>`)
-      })
-      expect(testWrapper(await toHaveText(page, "#foobar", "not-existing"))).toThrowErrorMatchingSnapshot()
+      await page.setContent(`<div id="foobar">zzzBarzzz</div>`)
+      await assertSnapshot(() =>
+        expect(page).toHaveText("#foobar", "not-existing")
+      )
     })
   })
   describe("element", () => {
     it("positive", async () => {
-      await page.evaluate(() => {
-        document.write(`<div id="foobar">zzzBarzzz</div>`)
-      })
+      await page.setContent(`<div id="foobar">zzzBarzzz</div>`)
       const element = await page.$("#foobar")
       expect(element).not.toBe(null)
-      expect(testWrapper(await toHaveText(element!, "Bar"))).toBe(true)
+      await expect(element).toHaveText("Bar")
     })
     it("negative", async () => {
-      await page.evaluate(() => {
-        document.write(`<div id="foobar">zzzBarzzz</div>`)
-      })
+      await page.setContent(`<div id="foobar">zzzBarzzz</div>`)
       const element = await page.$("#foobar")
       expect(element).not.toBe(null)
-      expect(testWrapper(await toHaveText(element!, "not-existing"))).toThrowErrorMatchingSnapshot()
+      await assertSnapshot(() => expect(element).toHaveText("not-existing"))
     })
   })
   describe("page", () => {
     it("positive", async () => {
-      await page.evaluate(() => {
-        document.write(`<body><div>zzzBarzzz</div></body>`)
-      })
-      expect(testWrapper(await toHaveText(page, "Bar"))).toBe(true)
+      await page.setContent(`<body><div>zzzBarzzz</div></body>`)
+      await expect(page).toHaveText("Bar")
     })
     it("negative", async () => {
-      await page.evaluate(() => {
-        document.write(`<body><div>zzzBarzzz</div></body>`)
-      })
-      expect(testWrapper(await toHaveText(page, "not-existing"))).toThrowErrorMatchingSnapshot()
+      await page.setContent(`<body><div>zzzBarzzz</div></body>`)
+      await assertSnapshot(() => expect(page).toHaveText("not-existing"))
     })
   })
   describe("timeout", () => {
     it("should throw an error after the timeout exceeds", async () => {
       const start = new Date().getTime()
-      expect(testWrapper(await toHaveText(page, "#foobar", "bar", {
-        timeout: 1 * 1000
-      }))).toThrowErrorMatchingSnapshot()
+      await assertSnapshot(() =>
+        expect(page).toHaveText("#foobar", "bar", { timeout: 1000 })
+      )
       const duration = new Date().getTime() - start
       expect(duration).toBeLessThan(1500)
     })

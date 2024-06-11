@@ -1,74 +1,101 @@
-import type { Page, ElementHandle } from "playwright-core"
+import type { Page, ElementHandle, Frame, Locator } from "playwright-core"
 import { PageWaitForSelectorOptions } from "../../global"
 
-const ExpectTypePage = "Page"
-const ExpectTypeElementHandle = "ElementHandle"
+type Handle = Page | Frame | ElementHandle | Locator
+export type ExpectInputType = Handle | Promise<Handle>
 
-type ExpectType = typeof ExpectTypePage | typeof ExpectTypeElementHandle
-
-export type ExpectInputType = Page | ElementHandle
-
-export const detectExpectType = (value: ExpectInputType): ExpectType => {
-  const className = value.constructor.name
-  switch (className) {
-    case "Page":
-      return ExpectTypePage
-    case "ElementHandle":
-      return ExpectTypeElementHandle
-    default:
-      throw new Error(`could not recognize type: ${className}`)
-  }
+const isElementHandle = (value: Handle): value is ElementHandle => {
+  return value.constructor.name === "ElementHandle"
 }
 
-interface getElementTextReturn {
-  elementHandle: ElementHandle
-  selector?: string
-  expectedValue: string
+const isLocator = (value: Handle): value is Locator => {
+  return value.constructor.name === "Locator"
 }
 
-export type InputArguments = [Page | ElementHandle, string?, (string | PageWaitForSelectorOptions)?, PageWaitForSelectorOptions?]
+export const getFrame = async (value: ExpectInputType) => {
+  const resolved = await value
 
-const lastElementHasType = (args: InputArguments, type: "string" | "object"): boolean => typeof args[args.length - 1] === type
+  return isElementHandle(resolved)
+    ? resolved.contentFrame()
+    : (resolved as Page | Frame)
+}
 
-export const getElementText = async (...args: InputArguments): Promise<getElementTextReturn> => {
-  /**
-  * Handle the following cases:
-  * - expect(page).foo("bar")
-  * - expect(element).foo("bar")
-  */
-  if (args.length === 2) {
-    const type = detectExpectType(args[0])
-    if (type === ExpectTypeElementHandle) {
-      return {
-        elementHandle: args[0] as ElementHandle,
-        expectedValue: args[1] as string
-      }
-    }
-    const page = args[0] as Page
-    return {
-      elementHandle: await page.$("body") as ElementHandle,
-      expectedValue: args[1] as string
-    }
+const isObject = (value: unknown) =>
+  typeof value === "object" && !(value instanceof RegExp)
+
+export type InputArguments = [
+  ExpectInputType,
+  string?,
+  (string | PageWaitForSelectorOptions)?,
+  PageWaitForSelectorOptions?
+]
+
+export const getElementHandle = async (
+  args: InputArguments,
+  valueArgCount = 1
+) => {
+  // Pluck the options off the end first
+  const options =
+    args.length > 1 && isObject(args[args.length - 1])
+      ? (args.pop() as PageWaitForSelectorOptions)
+      : {}
+
+  // Next, pluck the number of args required by the matcher (defaults to 1)
+  const expectedValue = args.splice(-valueArgCount, valueArgCount) as string[]
+
+  // Finally, we can find the element handle
+  let handle = await args[0]
+  handle = (await getFrame(handle)) ?? handle
+
+  if (isLocator(handle)) {
+    handle = (await handle.elementHandle())!
   }
-  /**
-   * Handle the following case:
-   * - expect(page).foo("#foo", "bar")
-   */
-  if (args.length === 3 && lastElementHasType(args, "string") || args.length === 4 && lastElementHasType(args, "object")) {
-    const selector = args[1] as string
-    const page = args[0] as Page
+  // If the user provided a page or iframe, we need to locate the provided
+  // selector or the `body` element if none was provided.
+  else if (!isElementHandle(handle)) {
+    const selector = args[1] ?? "body"
+
     try {
-      await page.waitForSelector(selector, args[3] as PageWaitForSelectorOptions)
+      handle = (await handle.waitForSelector(selector, options))!
     } catch (err) {
       throw new Error(`Timeout exceed for element ${quote(selector)}`)
     }
-    return {
-      elementHandle: await page.$(selector) as ElementHandle,
-      expectedValue: args[2] as string,
-      selector
-    }
   }
-  throw new Error(`Invalid input length: ${args.length}`)
+
+  return [handle, expectedValue] as const
 }
 
-export const quote = (val: string | null) => `'${val}'`
+export const quote = (val: string | null) => (val === null ? "" : `'${val}'`)
+
+export const getMessage = (
+  { isNot, promise, utils, expand }: jest.MatcherContext,
+  matcher: string,
+  expected: unknown,
+  received: unknown,
+  expectedHint: string | undefined = undefined
+) => {
+  const message = isNot
+    ? `Expected: not ${utils.printExpected(expected)}`
+    : utils.printDiffOrStringify(
+        expected,
+        received,
+        "Expected",
+        "Received",
+        expand
+      )
+
+  return (
+    utils.matcherHint(matcher, undefined, expectedHint, { isNot, promise }) +
+    "\n\n" +
+    message
+  )
+}
+
+export const compareText = (
+  expectedValue: string | RegExp,
+  actualValue: string | null
+) => {
+  return typeof expectedValue === "string"
+    ? expectedValue === actualValue
+    : expectedValue.test(actualValue ?? "")
+}

@@ -1,40 +1,60 @@
-import { testWrapper } from "../tests/utils"
-
-import toHaveSelector from '.'
+import { assertSnapshot } from "../tests/utils"
 
 describe("toHaveSelector", () => {
-  afterEach(async () => {
-    await page.evaluate(() => document.body.innerHTML = "")
+  beforeEach(async () => {
+    await jestPlaywright.resetContext()
   })
   it("positive", async () => {
-    await page.evaluate(() => {
-      document.write(`<div id="foobar">Bar</div>`)
-    })
-    const result = await toHaveSelector(page, "#foobar")
-    expect(result.pass).toBe(true)
-    expect(result.message()).toMatchSnapshot()
+    await page.setContent(`<div id="foobar">Bar</div>`)
+    await expect(page).toHaveSelector("#foobar")
+  })
+  it("positive with an element handle", async () => {
+    await page.setContent(`<div id="foo"><div id="bar">Baz</div></div>`)
+    const handle = await page.$("#foo")
+    expect(handle).toBeTruthy()
+    await expect(handle).toHaveSelector("#bar")
+  })
+  it("positive in frame", async () => {
+    await page.setContent(`<iframe src="http://localhost:8080"></iframe>`)
+    const handle = page.$("iframe")
+    await expect(handle).toHaveSelector("#attr")
+    await expect(await handle).toHaveSelector("#attr")
+
+    const frame = (await handle)?.contentFrame()
+    await expect(frame).toHaveSelector("#attr")
+    await expect(await frame).toHaveSelector("#attr")
   })
   it("negative", async () => {
-    expect(testWrapper(await toHaveSelector(page, "#foobar", {
-      timeout: 1 * 1000
-    }))).toThrowError()
+    await assertSnapshot(() =>
+      expect(page).toHaveSelector("#foobar", { timeout: 1000 })
+    )
   })
+
+  describe("with 'not' usage", () => {
+    it("positive", async () => {
+      await expect(page).not.toHaveSelector("#foobar")
+    })
+
+    it("negative", async () => {
+      await page.setContent(`<div id="foobar">Bar</div>`)
+      await assertSnapshot(() =>
+        expect(page).not.toHaveSelector("#foobar", { timeout: 1000 })
+      )
+    })
+  })
+
   describe("timeout", () => {
     it("positive: should be able to use a custom timeout", async () => {
       setTimeout(async () => {
-        await page.evaluate(() => {
-          document.write(`<div id="foobar">Bar</div>`)
-        })
+        await page.setContent(`<div id="foobar">Bar</div>`)
       }, 500)
-      expect(testWrapper(await toHaveSelector(page, "#foobar", {
-        timeout: 1 * 1000
-      }))).toBe(true)
+      await expect(page).toHaveSelector("#foobar", { timeout: 1000 })
     })
     it("should throw an error after the timeout exceeds", async () => {
       const start = new Date().getTime()
-      expect(testWrapper(await toHaveSelector(page, "#foobar", {
-        timeout: 1 * 1000
-      }))).toThrowError()
+      await assertSnapshot(() =>
+        expect(page).toHaveSelector("#foobar", { timeout: 1000 })
+      )
       const duration = new Date().getTime() - start
       expect(duration).toBeLessThan(1500)
     })
